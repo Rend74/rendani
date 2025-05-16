@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>conect with friends by rendani</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f4f4f9;
+    }
+
+    .container {
+      text-align: center;
+    }
+
+    .video-container {
+      display: flex;
+      justify-content: center;
+      margin: 20px 0;
+    }
+
+    video {
+      width: 300px;
+      height: 200px;
+      margin: 0 10px;
+      border: 2px solid #333;
+      border-radius: 5px;
+      background-color: black;
+    }
+
+    .controls {
+      margin-top: 20px;
+    }
+
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+
+    #startButton {
+      background-color: #28a745;
+      color: white;
+    }
+
+    #callButton {
+      background-color: #007bff;
+      color: white;
+    }
+
+    #hangupButton {
+      background-color: #dc3545;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>TBR VIDEO call</h1>
+    <div class="video-container">
+      <video id="localVideo" autoplay playsinline muted></video>
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+    <div class="controls">
+      <button id="startButton">Start</button>
+      <button id="callButton" disabled>Call</button>
+      <button id="hangupButton" disabled>Hang Up</button>
+    </div>
+  </div>
+  <script>
+    let localStream;
+    let remoteStream;
+    let peerConnection;
+
+    const configuration = {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+
+    const signalingServerUrl = 'ws://localhost:8080';
+    const ws = new WebSocket(signalingServerUrl);
+
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const startButton = document.getElementById('startButton');
+    const callButton = document.getElementById('callButton');
+    const hangupButton = document.getElementById('hangupButton');
+
+    startButton.addEventListener('click', start);
+    callButton.addEventListener('click', call);
+    hangupButton.addEventListener('click', hangup);
+
+    ws.onmessage = (message) => {
+      const data = JSON.parse(message.data);
+
+      if (data.type === 'offer') {
+        handleOffer(data.offer);
+      } else if (data.type === 'answer') {
+        handleAnswer(data.answer);
+      } else if (data.type === 'candidate') {
+        handleCandidate(data.candidate);
+      }
+    };
+
+    function start() {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        .then(stream => {
+          localVideo.srcObject = stream;
+          localStream = stream;
+          callButton.disabled = false;
+        })
+        .catch(error => console.error('Error accessing media devices.', error));
+    }
+
+    function call() {
+      peerConnection = new RTCPeerConnection(configuration);
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+        }
+      };
+
+      peerConnection.ontrack = (event) => {
+        remoteVideo.srcObject = event.streams[0];
+      };
+
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+      });
+
+      peerConnection.createOffer()
+        .then(offer => {
+          return peerConnection.setLocalDescription(offer);
+        })
+        .then(() => {
+          ws.send(JSON.stringify({ type: 'offer', offer: peerConnection.localDescription }));
+        });
+
+      hangupButton.disabled = false;
+      callButton.disabled = true;
+    }
+
+    function handleOffer(offer) {
+      peerConnection = new RTCPeerConnection(configuration);
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+        }
+      };
+
+      peerConnection.ontrack = (event) => {
+        remoteVideo.srcObject = event.streams[0];
+      };
+
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+      });
+
+      peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+        .then(() => peerConnection.createAnswer())
+        .then(answer => {
+          return peerConnection.setLocalDescription(answer);
+        })
+        .then(() => {
+          ws.send(JSON.stringify({ type: 'answer', answer: peerConnection.localDescription }));
+        });
+    }
+
+    function handleAnswer(answer) {
+      peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    }
+
+    function handleCandidate(candidate) {
+      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+
+    function hangup() {
+      peerConnection.close();
+      peerConnection = null;
+      hangupButton.disabled = true;
+      callButton.disabled = false;
+    }
+  </script>
+</body>
+</html>
